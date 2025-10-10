@@ -160,57 +160,64 @@ def pytorch_train(model, optimizer, criterion, device, num_epochs, train_loader,
    
     return train_losses, val_losses
 
-def pytorch_train_VAE(model, optimizer, criterion, device, num_epochs, train_loader, val_loader):
+def pytorch_train_VAE(model, optimizer, criterion, device, num_epochs, train_loader, val_loader, patience=20):    
     best_val_loss = float('inf')
     patience_counter = 0
-    patience = 20
-    
     train_losses = []
     val_losses = []
     
     for epoch in range(num_epochs):
-       # training
-       model.train()
-       train_loss = 0.0
-       for batch_X, batch_y in train_loader:
-           batch_X = batch_X.to(device)
-           batch_y = batch_y.permute(0, 3, 1, 2).float().to(device)
-           # forward pass
-           optimizer.zero_grad()
-           recon, z_mean, z_log_var = model(batch_y, batch_X)
-           loss = criterion(batch_y, recon, z_mean, z_log_var)
-           # backward pass
-           loss.backward()
-           optimizer.step()
-           train_loss += loss.item()
-    
-        # validation
-       model.eval()
-       val_loss = 0.0
-       with torch.no_grad():
-           for batch_X, batch_y in val_loader:
-               batch_X = batch_X.to(device)
-               batch_y = batch_y.permute(0, 3, 1, 2).float().to(device)
+        model.train()
+        train_loss = 0.0
+        total_train_samples = 0
+        
+        for batch_X, batch_y in train_loader:
+            batch_X = batch_X.to(device)
+            batch_y = batch_y.to(device)
+            batch_size = batch_X.size(0)
+            
+            optimizer.zero_grad()
+            recon, z_mean, z_log_var = model(batch_y, batch_X)
+            loss = criterion(batch_y, recon, z_mean, z_log_var)
+            
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * batch_size
+            total_train_samples += batch_size
+        
+        train_loss /= total_train_samples
+        
+        model.eval()
+        val_loss = 0.0
+        total_val_samples = 0
+        
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                batch_X = batch_X.to(device)
+                batch_y = batch_y.to(device)
+                batch_size = batch_X.size(0)
+                
+                recon, z_mean, z_log_var = model(batch_y, batch_X) 
+                loss = criterion(batch_y, recon, z_mean, z_log_var)
+                
+                val_loss += loss.item() * batch_size
+                total_val_samples += batch_size
+        
+        val_loss /= total_val_samples
+        
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        
+        print(f'Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}')
 
-               recon, z_mean, z_log_var = model(batch_y, batch_X)
-               loss = criterion(batch_y, recon, z_mean, z_log_var)
-               val_loss += loss.item()
-       
-       train_loss /= len(train_loader)
-       val_loss /= len(val_loader)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f'Early stopping triggered at epoch {epoch+1}.')
+                break
     
-       train_losses.append(train_loss)
-       val_losses.append(val_loss)
-       
-       print(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
-       
-       if val_loss < best_val_loss:
-           best_val_loss = val_loss
-           patience_counter = 0
-       else:
-           patience_counter += 1
-           if patience_counter >= patience:
-               print(f'Early stopping at epoch {epoch+1}')
-               break
-   
     return train_losses, val_losses
